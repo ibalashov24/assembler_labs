@@ -10,8 +10,7 @@
 ;		Реализовать фильтр Собеля обработки изображений с использованием вещественных
 ;       вычислений
 .DATA
-	TopBorder		qword	255
-	BottomBorder	qword	0
+	TopBorder		qword	255	; Верхняя граница значения пиксела в арифметике насыщения
 	MultiplierTwo	dword	2	; Множитель "2" для фильтра Собеля
 .CODE
 ; -------------------------------------------------------------------------------------	;
@@ -38,44 +37,45 @@ Kernel PROC	; [RCX] - pDst
 	; Gy = 2*(z2 - z8) + z2 + z3 - z7 - z9
 	; Тогда итоговое значение после обработки будет равно [RCX] = sqrt(Gx^2 + Gy^2)
 
-	finit
 
 	; Сохраняем изначальную вершину стека для последующего его восстановления
 	mov r9, rsp
 
 	; Выполняем чтение обрабатываемой матрицы в стек
-	movzx rax, byte ptr [rdx]
-	push rax
-	movzx rax, byte ptr [rdx + 1]
-	push rax
-	movzx rax, byte ptr [rdx + 2]
-	push rax
-	movzx rax, byte ptr [rdx + r8]
-	push rax
-	movzx rax, byte ptr [rdx + r8 + 2]
-	push rax
-	movzx rax, byte ptr [rdx + 2*r8]
-	push rax
-	movzx rax, byte ptr [rdx + 2*r8 + 1]
-	push rax
-	movzx rax, byte ptr [rdx + 2*r8 + 2]
+	movzx rax, byte ptr [rdx]					; Читаем z1 и расширяем нулями до qword,
+												; чтобы можно было сбросить в стек
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + 1]				; Читаем z2
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + 2]				; Читаем z3
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + r8]				; Читаем z4
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + r8 + 2]			; Читаем z6
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + 2*r8]			; Читаем z7
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + 2*r8 + 1]		; Читаем z8
+	push rax									; Загружаем его в стек
+	movzx rax, byte ptr [rdx + 2*r8 + 2]		; Читаем z9
 	push rax
 	
 	; Вычисляем Gx
 
 	; Добавляем элементы с коэффициентом +-1
-	fldz ; Инициализиуем сумму нулём
-	fiadd dword ptr [rsp + 8* 7]
-	fisub dword ptr [rsp + 8* 5]
-	fiadd dword ptr [rsp + 8* 2]
-	fisub dword ptr [rsp + 8* 0]
+	fldz							; Инициализиуем общую сумму Gx нулём
+	fiadd dword ptr [rsp + 8* 7]	; + z1
+	fisub dword ptr [rsp + 8* 5]	; - z3
+	fiadd dword ptr [rsp + 8* 2]	; + z7
+	fisub dword ptr [rsp + 8* 0]	; - z9
 
 	; Добавляем элементы с коэффициентов +-2
-	fldz ; Инициализиуем сумму нулём
-	fiadd dword ptr [rsp + 8* 4]
-	fisub dword ptr [rsp + 8* 3]
-	fimul MultiplierTwo 
-	faddp
+	fldz							; Инициализиуем сумму (z4 - z6) нулём
+	fiadd dword ptr [rsp + 8* 4]	; + z4
+	fisub dword ptr [rsp + 8* 3]	; - z6
+	fimul MultiplierTwo				; Умножаем (z4 - z6) на 2
+	faddp							; Добавляем удвоенную сумму к общей сумме 
+									; и получаем Gx
 
 	; Возводим Gx в квадртат
 	fmul st(0),st(0)
@@ -84,18 +84,19 @@ Kernel PROC	; [RCX] - pDst
 	; Вычисляем Gy
 
 	; Добавляем элементы с коэффициентом +-1
-	fldz ; Инициализиуем сумму нулём
-	fiadd dword ptr [rsp + 8* 7]
-	fiadd dword ptr [rsp + 8* 5]
-	fisub dword ptr [rsp + 8* 2]
-	fisub dword ptr [rsp + 8* 0]
+	fldz							; Инициализиуем общую сумму Gy нулём
+	fiadd dword ptr [rsp + 8* 7]    ; + z1
+	fiadd dword ptr [rsp + 8* 5]    ; + z3
+	fisub dword ptr [rsp + 8* 2]	; - z7
+	fisub dword ptr [rsp + 8* 0]	; - z9
 
 	; Добавляем элементы с коэффициентов +-2
-	fldz
-	fiadd dword ptr [rsp + 8* 6]
-	fisub dword ptr [rsp + 8* 1]
-	fimul MultiplierTwo ; Умножаем на 2
-	faddp ; Добавляем элементы с коэффициентом 2 к сумме остальных элементов
+	fldz							; Инициализиуем сумму (z2 - z8) нулём
+	fiadd dword ptr [rsp + 8* 6]	; + z2
+	fisub dword ptr [rsp + 8* 1]	; - z8 
+	fimul MultiplierTwo				; Умножаем (z2 - z8) на 2
+	faddp							; Добавляем удвоенную сумму к общей сумме 
+									; и получаем Gy
 
 	; Возводим Gy в квадртат
 	fmul st(0),st(0)
@@ -110,19 +111,24 @@ Kernel PROC	; [RCX] - pDst
 	; 1) Проверка верхней границы
 	fild TopBorder			; Загрузили в FPU верхнюю границу (255)
 	fcomi st(0),st(1)		; Если полученное новое значение пиксела больше 255,
-	fcmovnbe st(0),st(1)	; то делаем его 255
+	fcmovnbe st(0),st(1); то делаем его 255
 	; 2) Проверка нижней границы
-	fild BottomBorder		; Загрузили в FPU нижнюю границу (0)
+	fldz					; Загрузили в FPU нижнюю границу (0)
 	fcomi st(0),st(1)		; Если полученное новое значение пиксела меньше 0,
 	fcmovb st(0),st(1)		; то делаем его нулём
 
 	; Записываем вычисленное значение в матрицу
-	sub rsp, 8				; Отодвигаем вершину стека, чтобы положитьв нее новое значение
-	fistp qword ptr [rsp]	; Кладем вершину стека FPU на вершину стека
+	fistp qword ptr [rsp]	; Кладем вершину стека FPU на вершину стека 
+							; Можем использовать текущий указатель RSP, 
+							; т.к там лежит уже не нужное значение
 	pop rax					; Загружаем результат обработки в регистр общего назначение
-	mov byte ptr [rcx], al	; Записываем результат
+	mov byte ptr [rcx], al	; Записываем результат обработки
 
-	; Очищаем стек
+	; Удаляем ненужные значения, образовавшиеся после насыщения, со стека FPU
+	fstp st(0)	; Удаляем остаток после сравнения с BottomBorder
+	fstp st(0)  ; Удаляем остаток после сравнения с TopBorder
+
+	; Очищаем стек RSP
 	mov rsp, r9
 
 	; Возврат из функции
