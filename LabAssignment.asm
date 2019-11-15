@@ -8,10 +8,8 @@
 ; -------------------------------------------------------------------------------------	;
 ;	Задание: 
 ;		Реализовать фильтр обработки изображений
-ROUND_MASK	EQU 0F3FFh	; Маска очистки битов округления RCB (bit 11,10) = 00
-ROUND_DOWN	EQU 0400h	; Маска установки битов округления вниз (bit 11,10)  = 01
 .DATA
-	MultiplierTwo	qword	2	; Множитель "2" для фильтра Собеля
+	MultiplierTwo	dword	2	; Множитель "2" для фильтра Собеля
 .CODE
 ; -------------------------------------------------------------------------------------	;
 ; Осуществляет фильтрацию одной цветовой составляющей изображения						;
@@ -26,100 +24,80 @@ ROUND_DOWN	EQU 0400h	; Маска установки битов округления вниз (bit 11,10)  = 01
 Kernel PROC	; [RCX] - pDst
 			; [RDX] - pSrc
 			; R8    - Width
-	; Здесь осуществляется копирование одной цветовой составляющей одного пиксела
-	;  из исходного изображения. Необходимо заменить этот код в соответствии с заданием
-	; mov		al, byte ptr [rdx] ; Копирование
-	; mov		byte ptr [rcx], al ;   одного пиксела
-
-
-
-	fldz
 	
-	movzx rax, byte ptr [rdx]
-	push rax
-	fiadd dword ptr [rsp]
-	pop rax 
-
-	movzx rax, byte ptr [rdx + 2*r8]
-	push rax
-	fiadd dword ptr [rsp]
-	pop rax
-
-	movzx rax, byte ptr [rdx + 2]
-	push rax
-	fisub dword ptr [rsp]
-	pop rax
-
-	movzx rax, byte ptr [rdx + 2*r8 + 2]
-	push rax
-	fisub dword ptr [rsp]
-	pop rax
-
-	fldz
-
-	movzx rax, byte ptr [rdx + r8]
-	push rax
-	fiadd dword ptr [rsp]
-	pop rax
-
-	movzx rax, byte ptr [rdx + r8 + 2]
-	push rax
-	fisub dword ptr [rsp]
-	pop rax
-
-	fmul MultiplierTwo
-	faddp 
-
-	fldz
-	fxch st(1)
+	; Сохраняем изначальную вершину стека для последующего его восстановления
+	mov r9, rsp
 
 	movzx rax, byte ptr [rdx]
 	push rax
-	fiadd dword ptr [rsp]
-	pop rax 
-
-	movzx rax, byte ptr [rdx + 2]
-	push rax
-	fiadd dword ptr [rsp]
-	pop rax
-
-	movzx rax, byte ptr [rdx + 2*r8]
-	push rax
-	fisub dword ptr [rsp]
-	pop rax
-
-	movzx rax, byte ptr [rdx + 2*r8 + 2]
-	push rax
-	fisub dword ptr [rsp]
-	pop rax
-
-	fldz
-
 	movzx rax, byte ptr [rdx + 1]
 	push rax
-	fiadd dword ptr [rsp]
-	pop rax
-
+	movzx rax, byte ptr [rdx + 2]
+	push rax
+	movzx rax, byte ptr [rdx + r8]
+	push rax
+	movzx rax, byte ptr [rdx + r8 + 2]
+	push rax
+	movzx rax, byte ptr [rdx + 2*r8]
+	push rax
 	movzx rax, byte ptr [rdx + 2*r8 + 1]
 	push rax
-	fisub dword ptr [rsp]
-	pop rax
+	movzx rax, byte ptr [rdx + 2*r8 + 2]
+	push rax
+	
 
-	fmul MultiplierTwo
-	faddp st(2),st(0)
+	; Вычисляем Gx
 
+	; Элементы с коэффициентом +-1
+	fldz
+	fiadd dword ptr [rsp + 8* 7]
+	fisub dword ptr [rsp + 8* 5]
+	fiadd dword ptr [rsp + 8* 2]
+	fisub dword ptr [rsp + 8* 0]
+
+	; Элементы с коэффициентов +-2
+	fldz
+	fiadd dword ptr [rsp + 8* 4]
+	fisub dword ptr [rsp + 8* 3]
+	fimul MultiplierTwo 
+	faddp
+
+	; Возводим в квадртат
+	fmul st(0),st(0)
+	
+	; Вычисляем Gy
+
+	; Элементы с коэффициентом +-1
+	fldz
+	fiadd dword ptr [rsp + 8* 7]
+	fiadd dword ptr [rsp + 8* 5]
+	fisub dword ptr [rsp + 8* 2]
+	fisub dword ptr [rsp + 8* 0]
+
+	; Элементы с коэффициентов +-2
+	fldz
+	fiadd dword ptr [rsp + 8* 6]
+	fisub dword ptr [rsp + 8* 1]
+	fimul MultiplierTwo 
+	faddp
+
+	; Возводим в квадртат
 	fmul st(0),st(0)
 
-	fxch st(1)
-	fmul st(0),st(0)
+	; Gx^2 + Gy^2
+	faddp
 
-	faddp 
+	; sqrt(Gx^2 + Gy^2)
 	fsqrt
 
+	; Записываем вычисленное значение в матрицу
 	sub rsp, 8
 	fistp qword ptr [rsp]
 	pop rax
 	mov byte ptr [rcx], al 
+
+	; Очищаем стек
+	mov rsp, r9
 
 	ret
 Kernel ENDP
