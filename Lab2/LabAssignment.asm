@@ -12,7 +12,7 @@
 .DATA
     ; Множитель "2" для фильтра Собеля
     MultiplierTwo           real4       2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0
-    ; Множитель "-1"
+    ; Множитель "-1" для смены знака
     MultiplierMinusOne      real4       -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0
 .CODE
 ; -------------------------------------------------------------------------------------  ;
@@ -39,19 +39,16 @@ Kernel PROC ; [RCX] - pDst
     ; Gy = 2*(z2 - z8) + z2 + z3 - z7 - z9
     ; Тогда итоговое значение после обработки будет равно [RCX] = sqrt(Gx^2 + Gy^2)
 
-    ; Сохраняем состояние стека
+    ; Сохраняем состояние стека RSP
     mov rax, rsp
 
-    ; Сохраняем состояние регистров в соответсвтии с соглашением
+    ; Сохраняем состояние регистров в стеке в соответствии с соглашением
     sub rsp, 32
     vmovdqu ymmword ptr [rsp], ymm6
     sub rsp, 32
     vmovdqu ymmword ptr [rsp], ymm7
     sub rsp, 32
     vmovdqu ymmword ptr [rsp], ymm8
-
-    ; Обнуляем все регистры
-    vzeroall
     
     ; Читаем по 8 экземпляров каждого используемого элемента матрицы
     ; (используем беззнаковое расширение)
@@ -64,7 +61,7 @@ Kernel PROC ; [RCX] - pDst
     vpmovzxbd ymm7, qword ptr [rdx + 2*r8 + 1]  ; z8
     vpmovzxbd ymm8, qword ptr [rdx]             ; z1
 
-    ; Конвертируем целые числа в вещественные
+    ; Конвертируем прочитанные целые числа в вещественные
     vcvtdq2ps ymm1, ymm1
     vcvtdq2ps ymm2, ymm2
     vcvtdq2ps ymm3, ymm3
@@ -88,7 +85,7 @@ Kernel PROC ; [RCX] - pDst
     vmulps ymm5, ymm5, MultiplierMinusOne   ; -z9
 
     ; Производим сложение и получаем Gx
-    vaddps ymm0, ymm0, ymm1     ; - z3
+    vmovapd ymm0, ymm1          ; - z3 (инициализируем сумму)
     vaddps ymm0, ymm0, ymm2     ; + 2*z4
     vaddps ymm0, ymm0, ymm3     ; + 2*z6
     vaddps ymm0, ymm0, ymm4     ; + z7
@@ -106,12 +103,12 @@ Kernel PROC ; [RCX] - pDst
     vmulps ymm7, ymm7, MultiplierMinusOne   ; -2*z8
 
     ; Выполняем сложение и получаем Gy
-    vaddps ymm9, ymm9, ymm8
-    vaddps ymm9, ymm9, ymm6
-    vaddps ymm9, ymm9, ymm1
-    vaddps ymm9, ymm9, ymm4
-    vaddps ymm9, ymm9, ymm5
-    vaddps ymm9, ymm9, ymm7
+    vmovapd ymm9, ymm8          ; + z1 (инициализируем сумму)
+    vaddps ymm9, ymm9, ymm6     ; + 2*z2
+    vaddps ymm9, ymm9, ymm1     ; + z3
+    vaddps ymm9, ymm9, ymm4     ; - 2*z4
+    vaddps ymm9, ymm9, ymm5     ; - z9
+    vaddps ymm9, ymm9, ymm7     ; - 2*z8
 
     ; Gy^2
     vmulps ymm9, ymm9, ymm9
@@ -121,13 +118,15 @@ Kernel PROC ; [RCX] - pDst
     ; sqrt(Gx^2 + Gy^2)
     vsqrtps ymm0, ymm0
 
-    ; Конветируем вешественные числа в целые DWORD
+    ; Конветируем вешественные числа в целые dword
     vcvtps2dq ymm0, ymm0
     ; Упаковываем dword в word 
     ; (знаковая арифметика насыщения, чтобы не портить диапазон для следующей команды)
     vpackssdw ymm0, ymm0, ymm0 
     ; Упаковываем word в byte (беззнаковая арифметика насыщения)
     vpackuswb ymm0, ymm0, ymm0 
+
+    ; Извлекаем результат по частям (т.к. две половины регистров AVX независимы)
 
     ; Извлекаем первые 4 байта результата из младшей части регистра YMM0
     vpextrd dword ptr [rcx], xmm0, 0
@@ -144,8 +143,8 @@ Kernel PROC ; [RCX] - pDst
     ; Восстанавливаем стек RSP
     mov rsp, rax
    
-    ; Зануляем все регистры YMM в соответствии с рекомендацией
-    vzeroupper
+    ; Зануляем все регистры YMM в соответствии с рекомендацией по производительности
+    vzeroall
 
     ; Возврат из функции
     ret
