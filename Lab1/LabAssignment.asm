@@ -42,37 +42,37 @@ Kernel PROC ; [RCX] - pDst
     mov r9, rsp
 
     ; Выполняем чтение обрабатываемой матрицы в стек
-    movzx rax, byte ptr [rdx]                   ; Читаем z1 и расширяем нулями до qword,
+    movzx ax, byte ptr [rdx]                   ; Читаем z1 и расширяем нулями до qword,
                                                 ; чтобы можно было сбросить в стек
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + 1]               ; Читаем z2
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + 2]               ; Читаем z3
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + r8]              ; Читаем z4
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + r8 + 2]          ; Читаем z6
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + 2*r8]            ; Читаем z7
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + 2*r8 + 1]        ; Читаем z8
-    push rax                                    ; Загружаем его в стек
-    movzx rax, byte ptr [rdx + 2*r8 + 2]        ; Читаем z9
-    push rax
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + 1]               ; Читаем z2
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + 2]               ; Читаем z3
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + r8]              ; Читаем z4
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + r8 + 2]          ; Читаем z6
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + 2*r8]            ; Читаем z7
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + 2*r8 + 1]        ; Читаем z8
+    push ax                                    ; Загружаем его в стек
+    movzx ax, byte ptr [rdx + 2*r8 + 2]        ; Читаем z9
+    push ax
 
     ; Вычисляем Gx
 
     ; Добавляем элементы с коэффициентом +-1
     fldz                            ; Инициализиуем общую сумму Gx нулём
-    fiadd dword ptr [rsp + 8* 7]    ; + z1
-    fisub dword ptr [rsp + 8* 5]    ; - z3
-    fiadd dword ptr [rsp + 8* 2]    ; + z7
-    fisub dword ptr [rsp + 8* 0]    ; - z9
+    fiadd word ptr [rsp + 2* 7]    ; + z1
+    fisub word ptr [rsp + 2* 5]    ; - z3
+    fiadd word ptr [rsp + 2* 2]    ; + z7
+    fisub word ptr [rsp + 2* 0]    ; - z9
 
     ; Добавляем элементы с коэффициентов +-2
     fldz                            ; Инициализиуем сумму (z4 - z6) нулём
-    fiadd dword ptr [rsp + 8* 4]    ; + z4
-    fisub dword ptr [rsp + 8* 3]    ; - z6
+    fiadd word ptr [rsp + 2* 4]    ; + z4
+    fisub word ptr [rsp + 2* 3]    ; - z6
     fimul MultiplierTwo             ; Умножаем (z4 - z6) на 2
     faddp                           ; Добавляем удвоенную сумму к общей сумме 
                                     ; и получаем Gx
@@ -85,15 +85,15 @@ Kernel PROC ; [RCX] - pDst
 
     ; Добавляем элементы с коэффициентом +-1
     fldz                            ; Инициализиуем общую сумму Gy нулём
-    fiadd dword ptr [rsp + 8* 7]    ; + z1
-    fiadd dword ptr [rsp + 8* 5]    ; + z3
-    fisub dword ptr [rsp + 8* 2]    ; - z7
-    fisub dword ptr [rsp + 8* 0]    ; - z9
+    fiadd word ptr [rsp + 2* 7]    ; + z1
+    fiadd word ptr [rsp + 2* 5]    ; + z3
+    fisub word ptr [rsp + 2* 2]    ; - z7
+    fisub word ptr [rsp + 2* 0]    ; - z9
 
     ; Добавляем элементы с коэффициентов +-2
     fldz                            ; Инициализиуем сумму (z2 - z8) нулём
-    fiadd dword ptr [rsp + 8* 6]    ; + z2
-    fisub dword ptr [rsp + 8* 1]    ; - z8 
+    fiadd word ptr [rsp + 2* 6]    ; + z2
+    fisub word ptr [rsp + 2* 1]    ; - z8 
     fimul MultiplierTwo             ; Умножаем (z2 - z8) на 2
     faddp                           ; Добавляем удвоенную сумму к общей сумме 
                                     ; и получаем Gy
@@ -118,10 +118,10 @@ Kernel PROC ; [RCX] - pDst
     fcmovb st(0),st(1)       ; то делаем его нулём
 
     ; Записываем вычисленное значение в матрицу
-    fistp qword ptr [rsp]    ; Кладем вершину стека FPU на вершину стека 
+    fistp word ptr [rsp]    ; Кладем вершину стека FPU на вершину стека 
                              ; Можем использовать текущий указатель RSP, 
                              ; т.к там лежит уже не нужное значение
-    pop rax                  ; Загружаем результат обработки в регистр общего назначение
+    mov ax, word ptr [rsp]                  ; Загружаем результат обработки в регистр общего назначение
     mov byte ptr [rcx], al   ; Записываем результат обработки
 
     ; Удаляем ненужные значения, образовавшиеся после насыщения, со стека FPU
