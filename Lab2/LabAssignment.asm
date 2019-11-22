@@ -1,5 +1,5 @@
 ; -------------------------------------------------------------------------------------  ;
-;    Лабораторная работа №n по курсу Программирование на языке ассемблера                ;
+;    Лабораторная работа №2 по курсу Программирование на языке ассемблера                ;
 ;    Вариант №2.6                                                                        ;
 ;    Выполнил студент Балашов Илья.                                                      ;
 ;                                                                                        ;
@@ -8,7 +8,7 @@
 ; -------------------------------------------------------------------------------------  ;
 ;    Задание: 
 ;        Реализовать фильтр Собеля обработки изображений с использованием вещественных
-;       вычислений
+;       вычислений и расширения AVX
 .DATA
     ; Множитель "2" для фильтра Собеля
     MultiplierTwo           real4       2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0
@@ -39,19 +39,30 @@ Kernel PROC ; [RCX] - pDst
     ; Gy = 2*(z2 - z8) + z2 + z3 - z7 - z9
     ; Тогда итоговое значение после обработки будет равно [RCX] = sqrt(Gx^2 + Gy^2)
 
-    vzeroall
+    ; Сохраняем состояние стека
+    mov rax, rsp
 
-    ; Сохранять ymm6 и ymm7, ymm8
+    ; Сохраняем состояние регистров в соответсвтии с соглашением
+    sub rsp, 32
+    vmovdqu ymmword ptr [rsp], ymm6
+    sub rsp, 32
+    vmovdqu ymmword ptr [rsp], ymm7
+    sub rsp, 32
+    vmovdqu ymmword ptr [rsp], ymm8
+
+    ; Обнуляем все регистры
+    vzeroall
     
-    ; Читаем по 8 экземпляров каждого элемента матрицы:
-    vpmovsxbd ymm1, qword ptr [rdx + 2]         ; z3
-    vpmovsxbd ymm2, qword ptr [rdx + r8]        ; z4
-    vpmovsxbd ymm3, qword ptr [rdx + r8 + 2]    ; z6
-    vpmovsxbd ymm4, qword ptr [rdx + 2*r8]      ; z7
-    vpmovsxbd ymm5, qword ptr [rdx + 2*r8 + 2]  ; z9
-    vpmovsxbd ymm6, qword ptr [rdx + 1]         ; z2
-    vpmovsxbd ymm7, qword ptr [rdx + 2*r8 + 1]  ; z8
-    vpmovsxbd ymm8, qword ptr [rdx]             ; z1
+    ; Читаем по 8 экземпляров каждого используемого элемента матрицы
+    ; (используем беззнаковое расширение)
+    vpmovzxbd ymm1, qword ptr [rdx + 2]         ; z3
+    vpmovzxbd ymm2, qword ptr [rdx + r8]        ; z4
+    vpmovzxbd ymm3, qword ptr [rdx + r8 + 2]    ; z6
+    vpmovzxbd ymm4, qword ptr [rdx + 2*r8]      ; z7
+    vpmovzxbd ymm5, qword ptr [rdx + 2*r8 + 2]  ; z9
+    vpmovzxbd ymm6, qword ptr [rdx + 1]         ; z2
+    vpmovzxbd ymm7, qword ptr [rdx + 2*r8 + 1]  ; z8
+    vpmovzxbd ymm8, qword ptr [rdx]             ; z1
 
     ; Конвертируем целые числа в вещественные
     vcvtdq2ps ymm1, ymm1
@@ -63,36 +74,38 @@ Kernel PROC ; [RCX] - pDst
     vcvtdq2ps ymm7, ymm7
     vcvtdq2ps ymm8, ymm8
 
-    ; Умножаем элементы средней строки на 2
-    vmulps ymm2, ymm2, MultiplierTwo 
-    vmulps ymm3, ymm3, MultiplierTwo
-    vmulps ymm6, ymm6, MultiplierTwo
-    vmulps ymm7, ymm7, MultiplierTwo
+    ; Умножаем на 2 элементы, которые в Gx и Gy будут с коэффициентом 2
+    vmulps ymm2, ymm2, MultiplierTwo    ; z4 
+    vmulps ymm3, ymm3, MultiplierTwo    ; z6
+    vmulps ymm6, ymm6, MultiplierTwo    ; z2
+    vmulps ymm7, ymm7, MultiplierTwo    ; z8
+    
+    ; Вычисляем Gx
 
     ; Применяем отрицание к элементам, которые в матрице Gx со знаком "минус"
-    vmulps ymm1, ymm1, MultiplierMinusOne
-    vmulps ymm3, ymm3, MultiplierMinusOne
-    vmulps ymm5, ymm5, MultiplierMinusOne
+    vmulps ymm1, ymm1, MultiplierMinusOne   ; -z3
+    vmulps ymm3, ymm3, MultiplierMinusOne   ; -2*z6
+    vmulps ymm5, ymm5, MultiplierMinusOne   ; -z9
 
     ; Производим сложение и получаем Gx
-    vaddps ymm0, ymm0, ymm1
-    vaddps ymm0, ymm0, ymm2
-    vaddps ymm0, ymm0, ymm3
-    vaddps ymm0, ymm0, ymm4
-    vaddps ymm0, ymm0, ymm5
-    vaddps ymm0, ymm0, ymm8
+    vaddps ymm0, ymm0, ymm1     ; - z3
+    vaddps ymm0, ymm0, ymm2     ; + 2*z4
+    vaddps ymm0, ymm0, ymm3     ; + 2*z6
+    vaddps ymm0, ymm0, ymm4     ; + z7
+    vaddps ymm0, ymm0, ymm5     ; - z9
+    vaddps ymm0, ymm0, ymm8     ; + z1
 
     ; Gx^2
     vmulps ymm0, ymm0, ymm0
 
-        
     ; Получаем Gy
 
-    vmulps ymm1, ymm1, MultiplierMinusOne
-    vmulps ymm4, ymm4, MultiplierMinusOne
-    vmulps ymm5, ymm5, MultiplierMinusOne
-    vmulps ymm7, ymm7, MultiplierMinusOne
+    ; Выставляем необходимые знаки + и - в соответствии с формулой Gy
+    vmulps ymm1, ymm1, MultiplierMinusOne   ; +z3, исправляем после Gx
+    vmulps ymm4, ymm4, MultiplierMinusOne   ; -2*z4
+    vmulps ymm7, ymm7, MultiplierMinusOne   ; -2*z8
 
+    ; Выполняем сложение и получаем Gy
     vaddps ymm9, ymm9, ymm8
     vaddps ymm9, ymm9, ymm6
     vaddps ymm9, ymm9, ymm1
@@ -105,19 +118,16 @@ Kernel PROC ; [RCX] - pDst
 
     ; Gx^2 + Gy^2
     vaddps ymm0, ymm0, ymm9
-
     ; sqrt(Gx^2 + Gy^2)
     vsqrtps ymm0, ymm0
 
-    
-
-    ; TODO: Optimize it!!!
-     
     ; Конветируем вешественные числа в целые DWORD
     vcvtps2dq ymm0, ymm0
-    ; Упаковываем результат из DWORD в BYTE
-    vpackssdw ymm0, ymm0, ymm0 ; из dword в word
-    vpacksswb ymm0, ymm0, ymm0 ; из word в byte
+    ; Упаковываем dword в word 
+    ; (знаковая арифметика насыщения, чтобы не портить диапазон для следующей команды)
+    vpackssdw ymm0, ymm0, ymm0 
+    ; Упаковываем word в byte (беззнаковая арифметика насыщения)
+    vpackuswb ymm0, ymm0, ymm0 
 
     ; Извлекаем первые 4 байта результата из младшей части регистра YMM0
     vpextrd dword ptr [rcx], xmm0, 0
@@ -125,9 +135,18 @@ Kernel PROC ; [RCX] - pDst
     vextracti128 xmm0, ymm0, 1
     ; Извлекаем вторые 4 байта результата
     vpextrd dword ptr [rcx + 4], xmm0, 0
+
+    ; Восстанавливаем регистры YMM в соответствии с соглашением
+    vmovdqu ymm8, ymmword ptr [rsp + 0*32]
+    vmovdqu ymm7, ymmword ptr [rsp + 1*32]
+    vmovdqu ymm6, ymmword ptr [rsp + 2*32]
+
+    ; Восстанавливаем стек RSP
+    mov rsp, rax
    
-    ; Зануляем все регистры YMM
-    vzeroall
+    ; Зануляем все регистры YMM в соответствии с рекомендацией
+    vzeroupper
+
     ; Возврат из функции
     ret
 Kernel ENDP
