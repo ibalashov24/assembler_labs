@@ -10,8 +10,10 @@
 ;        Реализовать фильтр Собеля обработки изображений с использованием вещественных
 ;       вычислений
 .DATA
-    TopBorder        qword    255    ; Верхняя граница значения пиксела в арифметике насыщения
-    MultiplierTwo    dword    2      ; Множитель "2" для фильтра Собеля
+    ; Множитель "2" для фильтра Собеля
+    MultiplierTwo           real4       2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0
+    ; Множитель "-1"
+    MultiplierMinusOne      real4       -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0
 .CODE
 ; -------------------------------------------------------------------------------------  ;
 ; Осуществляет фильтрацию одной цветовой составляющей изображения                        ;
@@ -36,101 +38,53 @@ Kernel PROC ; [RCX] - pDst
     ; Gx = 2*(z4 - z0) + z1 + z7 - z3 - z9
     ; Gy = 2*(z2 - z8) + z2 + z3 - z7 - z9
     ; Тогда итоговое значение после обработки будет равно [RCX] = sqrt(Gx^2 + Gy^2)
-
-
-    ; Сохраняем изначальную вершину стека для последующего его восстановления
-    mov r9, rsp
-
-    ; Выполняем чтение обрабатываемой матрицы в стек
-    movzx ax, byte ptr [rdx]                   ; Читаем z1 и расширяем нулями до qword,
-                                                ; чтобы можно было сбросить в стек
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + 1]               ; Читаем z2
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + 2]               ; Читаем z3
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + r8]              ; Читаем z4
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + r8 + 2]          ; Читаем z6
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + 2*r8]            ; Читаем z7
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + 2*r8 + 1]        ; Читаем z8
-    push ax                                    ; Загружаем его в стек
-    movzx ax, byte ptr [rdx + 2*r8 + 2]        ; Читаем z9
-    push ax
-
-    ; Вычисляем Gx
-
-    ; Добавляем элементы с коэффициентом +-1
-    fldz                            ; Инициализиуем общую сумму Gx нулём
-    fiadd word ptr [rsp + 2* 7]    ; + z1
-    fisub word ptr [rsp + 2* 5]    ; - z3
-    fiadd word ptr [rsp + 2* 2]    ; + z7
-    fisub word ptr [rsp + 2* 0]    ; - z9
-
-    ; Добавляем элементы с коэффициентов +-2
-    fldz                            ; Инициализиуем сумму (z4 - z6) нулём
-    fiadd word ptr [rsp + 2* 4]    ; + z4
-    fisub word ptr [rsp + 2* 3]    ; - z6
-    fimul MultiplierTwo             ; Умножаем (z4 - z6) на 2
-    faddp                           ; Добавляем удвоенную сумму к общей сумме 
-                                    ; и получаем Gx
-
-    ; Возводим Gx в квадртат
-    fmul st(0),st(0)
     
+    ; Читаем по 8 экземпляров:
+    vpmovsxbd ymm0, qword ptr [rdx]             ; z1
+    vpmovsxbd ymm1, qword ptr [rdx + 2]         ; z3
+    vpmovsxbd ymm2, qword ptr [rdx + r8]        ; z4
+    vpmovsxbd ymm3, qword ptr [rdx + r8 + 2]    ; z6
+    vpmovsxbd ymm4, qword ptr [rdx + 2*r8]      ; z7
+    vpmovsxbd ymm5, qword ptr [rdx + 2*r8 + 2]  ; z9
 
-    ; Вычисляем Gy
+    vcvtdq2ps ymm0, ymm0
+    vcvtdq2ps ymm1, ymm1
+    vcvtdq2ps ymm2, ymm2
+    vcvtdq2ps ymm3, ymm3
+    vcvtdq2ps ymm4, ymm4
+    vcvtdq2ps ymm5, ymm5
 
-    ; Добавляем элементы с коэффициентом +-1
-    fldz                            ; Инициализиуем общую сумму Gy нулём
-    fiadd word ptr [rsp + 2* 7]    ; + z1
-    fiadd word ptr [rsp + 2* 5]    ; + z3
-    fisub word ptr [rsp + 2* 2]    ; - z7
-    fisub word ptr [rsp + 2* 0]    ; - z9
+    ; Умножаем элементы средней строки на 2
+    vmulps ymm2, ymm2, MultiplierTwo 
+    vmulps ymm3, ymm3, MultiplierTwo
 
-    ; Добавляем элементы с коэффициентов +-2
-    fldz                            ; Инициализиуем сумму (z2 - z8) нулём
-    fiadd word ptr [rsp + 2* 6]    ; + z2
-    fisub word ptr [rsp + 2* 1]    ; - z8 
-    fimul MultiplierTwo             ; Умножаем (z2 - z8) на 2
-    faddp                           ; Добавляем удвоенную сумму к общей сумме 
-                                    ; и получаем Gy
+    ; Применяем отрицание к элементам, которые в матрице Собеля со знаком "минус"
+    vmulps ymm1, ymm1, MultiplierMinusOne
+    vmulps ymm3, ymm3, MultiplierMinusOne
+    vmulps ymm5, ymm5, MultiplierMinusOne
 
-    ; Возводим Gy в квадртат
-    fmul st(0),st(0)
+    ; Производим сложение
+    vaddps ymm0, ymm0, ymm1
+    vaddps ymm0, ymm0, ymm2
+    vaddps ymm0, ymm0, ymm3
+    vaddps ymm0, ymm0, ymm4
+    vaddps ymm0, ymm0, ymm5
 
-    ; Gx^2 + Gy^2
-    faddp
+    ; Конветируем вешественные числа в целые DWORD
+    vcvtps2dq ymm0, ymm0
+    ; Упаковываем результат из DWORD в BYTE
+    vpackssdw ymm0, ymm0, ymm0 ; из dword в word
+    vpacksswb ymm0, ymm0, ymm0 ; из word в byte
 
-    ; sqrt(Gx^2 + Gy^2)
-    fsqrt
-
-    ; Арифметика насыщения:
-    ; 1) Проверка верхней границы
-    fild TopBorder           ; Загрузили в FPU верхнюю границу (255)
-    fcomi st(0),st(1)        ; Если полученное новое значение пиксела больше 255,
-    fcmovnbe st(0),st(1)     ; то делаем его 255
-    ; 2) Проверка нижней границы
-    fldz                     ; Загрузили в FPU нижнюю границу (0)
-    fcomi st(0),st(1)        ; Если полученное новое значение пиксела меньше 0,
-    fcmovb st(0),st(1)       ; то делаем его нулём
-
-    ; Записываем вычисленное значение в матрицу
-    fistp word ptr [rsp]    ; Кладем вершину стека FPU на вершину стека 
-                             ; Можем использовать текущий указатель RSP, 
-                             ; т.к там лежит уже не нужное значение
-    mov ax, word ptr [rsp]                  ; Загружаем результат обработки в регистр общего назначение
-    mov byte ptr [rcx], al   ; Записываем результат обработки
-
-    ; Удаляем ненужные значения, образовавшиеся после насыщения, со стека FPU
-    fstp st(0)  ; Удаляем остаток после сравнения с BottomBorder
-    fstp st(0)  ; Удаляем остаток после сравнения с TopBorder
-
-    ; Очищаем стек RSP
-    mov rsp, r9
-
+    ; Извлекаем первые 4 байта результата из младшей части регистра YMM0
+    vpextrd dword ptr [rcx], xmm0, 0
+    ; Переносим старшую часть регистра YMM0 в младшую
+    vextracti128 xmm0, ymm0, 1
+    ; Извлекаем вторые 4 байта результата
+    vpextrd dword ptr [rcx + 4], xmm0, 0
+   
+    ; Зануляем все регистры YMM
+    vzeroall
     ; Возврат из функции
     ret
 Kernel ENDP
